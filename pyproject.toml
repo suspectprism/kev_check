@@ -1,0 +1,10 @@
+[project]
+name = "vcf-vulns"
+version = "0.1.0"
+description = "Download VCF security advisory reports from support.broadcom.com"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4>=4.14.2",
+    "requests>=2.32.5",
+]
