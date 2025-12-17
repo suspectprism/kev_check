@@ -1,4 +1,4 @@
-# Collect VCF vulnerability advisory details from an advisory at support.broadcom.com
+# Collect VCF vulnerability details from advisories at support.broadcom.com
 # and save relevant data into a spreadsheet, maybe a database in future.
 #
 #
@@ -7,6 +7,7 @@
 import requests
 from bs4 import BeautifulSoup
 import re
+import pandas as pd
 
 def process_brcm_advisory(advisory_soup):
 	cvss_pattern = r'[- ]+' # Regex pattern to split CVSS scores on hyphens and spaces (one or more times)
@@ -25,10 +26,10 @@ def process_brcm_advisory(advisory_soup):
 	else:
 		advisory_title = title_remainder.strip()
 
-	tables = advisory_soup.find_all('div', class_='card-body')
+	cards = advisory_soup.find_all('div', class_='card-body')
 
-	for table in tables:
-		rows = table.find_all('div', class_='row')
+	for card in cards:
+		rows = card.find_all('div', class_='row')
 		for row in rows:
 			cells = row.find_all('div', class_='col-4')
 			for cell in cells:
@@ -54,6 +55,25 @@ def process_brcm_advisory(advisory_soup):
 		prod_lines = col.find_all('li')
 		for prod_line in prod_lines:
 			affected_prods.append(prod_line.text.strip())
+
+	tables = advisory_soup.find_all('tbody')[1:] # Skip the first table which is not relevant
+
+	for table in tables:
+		row_list = []
+		table_rows = table.find_all('tr')
+
+		for tr in table_rows:
+			cell_list = []
+			tds = tr.find_all('td')
+
+			for td in tds:
+				cell_list.append(td.text.strip())
+			
+			row_list.append(cell_list)
+		
+		header = row_list[0] # First row as header
+		df = pd.DataFrame(row_list[1:], columns=header) # Remaining rows as data
+		print(df)
 
 	print(vmsa, advisory_title, pub_date, upd_date, severity, cvss_score, cve_ids, affected_prods)
 
