@@ -11,5 +11,8 @@ Download the latest CISA KEV list.
 - Download new KEV changes compared to the local version of the list.
 - Check specifically for Broadcom or VMware as vendor
 
-Uses config.py. Requires requests, openpyxl.
-N.B. *requests* stopped working with an SSL error. Resolved with: `uv pip install pip-system-certs`
+Uses config.py. Requires requests, openpyxl, colorama.
+
+N.B. *requests* stopped working with an SSL error.
+
+Resolved with: `uv pip install pip-system-certs`
