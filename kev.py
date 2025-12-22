@@ -1,10 +1,10 @@
 # Download CISA KEV list from CISA website and extract relevant data
 # Save updated KEV data to local Excel spreadsheet
 #
-# Report any new VMware/Broadcom KEV vulnerabilities found
+# Show if any new VMware/Broadcom KEV vulnerabilities found
 #
 #
-# P Dowley   v0.1      22 Dec 2025
+# P Dowley   v0.1      23 Dec 2025
 
 import requests
 import sys
@@ -12,6 +12,7 @@ from pathlib import Path
 import openpyxl
 from datetime import date
 import shutil
+from colorama import Fore, Style
 from config import load_config
 
 def get_kev_data(kev_url):
@@ -34,27 +35,35 @@ def check_kev_updates(kev_data, kev_in_path):
     # Get the catalog version and date released from the new KEV data on the CISA website
     latest_catalog_version = kev_data.get("catalogVersion", "")
     latest_date_released = kev_data.get("dateReleased", "")
+    latest_count = kev_data.get("count", "")
 
     # Get the existing catalog version and date released from the summary sheet of the local workbook
     saved_catalog_version = None
     saved_date_released = None
+    saved_count = None
+    vmw_count = None
 
     for row in ws.iter_rows(min_row=1, values_only=True):
         if row[0] == "Catalog Version":
             saved_catalog_version = row[1]
         elif row[0] == "Date Released":
             saved_date_released = row[1]
+        elif row[0] == "Count of Vulnerabilities":
+            saved_count = row[1]
+        elif row[0] == "Count of VMware/BRCM vulns":
+            vmw_count = row[1]
 
-    print(f" Saved KEV catalog version: {saved_catalog_version}, date released: {saved_date_released}")
-    print(f"Latest KEV catalog version: {latest_catalog_version}, date released: {latest_date_released}")
+    print(f" Saved KEV catalog version: {saved_catalog_version}, date released: {saved_date_released}, count: {saved_count}")
 
     # Compare catalog versions and dates to determine if KEV list has been updated
     if latest_catalog_version != saved_catalog_version or latest_date_released != saved_date_released:
-        return True
+        print(f"Latest KEV catalog version: {Fore.GREEN}{latest_catalog_version}{Style.RESET_ALL}, date released: {Fore.GREEN}{latest_date_released}{Style.RESET_ALL}, count: {Fore.YELLOW}{latest_count}{Style.RESET_ALL}")
+        return True, vmw_count
     else:
-        return False
+        print(f"Latest KEV catalog version: {latest_catalog_version}, date released: {latest_date_released}, count: {latest_count}")
+        return False, vmw_count
 
-def save_kev_to_excel(kev_data, out_fn):
+def save_kev_to_excel(kev_data, kev_in_fn, kev_out_path):
     '''Save KEV data to an Excel spreadsheet'''
 
     # Mapping of KEV header names to more user-friendly names, for the summary sheet
@@ -76,18 +85,20 @@ def save_kev_to_excel(kev_data, out_fn):
     for key, value in kev_data.items():
         name = name_dict[key] if key in name_dict else key
         summary_ws.append([name, value])
+    summary_ws.append(["Count of VMware/BRCM vulns", 0])  # Placeholder for VMware/Broadcom vuln count
 
     # Set column widths for better readability
-    summary_ws.column_dimensions['A'].width = 20
+    summary_ws.column_dimensions['A'].width = 25
     summary_ws.column_dimensions['B'].width = 40
 
-    #Set cells B1 - B4 to bold text
-    for row in summary_ws['B1:B4']:
+    #Set cells B1 - B5 to bold text
+    for row in summary_ws['B1:B5']:
         for cell in row:
             cell.font = openpyxl.styles.Font(bold=True)
 
-    #Set left alignment for the Count cell
+    #Set left alignment for the Count cells
     summary_ws['B4'].alignment = openpyxl.styles.Alignment(horizontal='left')
+    summary_ws['B5'].alignment = openpyxl.styles.Alignment(horizontal='left')
 
     # Write vulnerabilities information
     vulns_ws = wb.create_sheet(title="Vulns", index=1)
@@ -100,7 +111,7 @@ def save_kev_to_excel(kev_data, out_fn):
         cell.font = openpyxl.styles.Font(bold=True)
 
     # Set column widths for better readability
-    col_widths = [15, 15, 20, 40, 10, 40, 15, 10, 15]
+    col_widths = [15, 15, 20, 40, 10, 40, 15, 10, 20]
 
     for i, width in enumerate(col_widths, start=1):
         vulns_ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
@@ -123,9 +134,34 @@ def save_kev_to_excel(kev_data, out_fn):
     # Apply autofilter to the vulnerabilities sheet
     vulns_ws.auto_filter.ref = vulns_ws.dimensions
 
+    # Create a separate sheet for Broadcom/VMware vulnerabilities
+    vmw_vulns_ws = wb.copy_worksheet(vulns_ws)
+    vmw_vulns_ws.title = "VMware"
+    vmw_vulns_ws.index = 2
+
+    # Remove non-VMware/Broadcom entries from the VMware sheet
+    for row in range(vmw_vulns_ws.max_row, 1, -1):
+        vendor_cell = vmw_vulns_ws.cell(row=row, column=2)  # Vendor is in the second column
+        if "VMware" not in vendor_cell.value and "Broadcom" not in vendor_cell.value:
+            vmw_vulns_ws.delete_rows(row)
+
+    # Apply autofilter to the VMware sheet
+    vmw_vulns_ws.auto_filter.ref = vmw_vulns_ws.dimensions
+
+    # Add the count of VMware/Broadcom entries to the Summary sheet
+    vmw_count = vmw_vulns_ws.max_row - 1
+    summary_ws['B5'].value = vmw_count
+    print(f"Latest VMware count: {Fore.YELLOW}{vmw_count}{Style.RESET_ALL}")
+
     # Save the workbook to the specified file
+    today_str = date.today().isoformat()
+    out_fn = Path(kev_out_path) / f"CISA_KEV_{today_str}.xlsx"
+
     wb.save(out_fn)
     print(f"KEV data saved to {out_fn}")
+
+    # Copy the new KEV file to the input file path for future comparisons
+    shutil.copy(out_fn, kev_in_fn)
 
 def main():
     # Open config file
@@ -139,31 +175,23 @@ def main():
     # Retrieve local saved KEV spreadsheet if it exists
     kev_in_fn = config_dict['kev']['in_fn']
     kev_in_path = Path(kev_in_fn)
+    kev_out_path = config_dict['kev']['out_path']
 
-    kev_updated = False   # Default is that KEV list has not been updated
-    if kev_in_path.is_file():
-        # A saved KEV file exists.
-        file_exists = True
+    if kev_in_path.is_file():   # A saved KEV file exists
 
         # Check if the KEV list has been updated since last run.
-        kev_updated = check_kev_updates(kev_data, kev_in_path)
-        print(f"KEV list updated: {kev_updated}")
+        kev_updated, vmw_count = check_kev_updates(kev_data, kev_in_path)
+        if kev_updated:
+            # The KEV list has been updated so we need to save the new KEV data
+            print(f" Saved VMware count: {vmw_count}")
+            save_kev_to_excel(kev_data, kev_in_fn, kev_out_path)
+        else:
+            print("No changes to KEV list.")
+
     else:
-        file_exists = False
-
-    if not file_exists or kev_updated:
-        # If we don't have a saved KEV file then we need to save the KEV data; or
-        # if the KEV list has been updated then we need to save the new KEV data.
-        print("Saving updated KEV data to local Excel spreadsheet...")
-
-        # Save KEV data to local Excel spreadsheet
-        kev_out_path = config_dict['kev']['out_path']
-        today_str = date.today().isoformat()
-        kev_out_fn = Path(kev_out_path) / f"CISA_KEV_{today_str}.xlsx"
-        save_kev_to_excel(kev_data, kev_out_fn)
-
-        # Copy the new KEV file to the input file path for future comparisons
-        shutil.copy(kev_out_fn, kev_in_fn)
+        # We don't have a previously saved KEV file so we need to save one
+        print("Saving KEV data to local Excel spreadsheet...")
+        save_kev_to_excel(kev_data, kev_in_fn, kev_out_path)
 
 if __name__ == "__main__":
     main()
