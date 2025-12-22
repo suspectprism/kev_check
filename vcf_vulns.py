@@ -30,7 +30,6 @@ def read_sec_advisory_list(in_file):
 
 def process_brcm_advisory(advisory_soup):
 	'''Process a Broadcom advisory page and extract vulnerability details'''
-	cvss_pattern = r'[- ]+' # Regex pattern to split CVSS scores on hyphens and spaces (one or more times)
 	cve_pattern = r'[, ]+' # Regex pattern to split CVEs on commas and spaces (one or more times)
 
 	# Extract details from the page title
@@ -63,7 +62,7 @@ def process_brcm_advisory(advisory_soup):
 				elif sol_label == "Severity":
 					severity = sol_text
 				elif sol_label == "CVSS Base Score":
-					cvss_score = re.split(cvss_pattern, sol_text)
+					cvss_score = sol_text
 				elif sol_label == "Affected CVE":
 					cve_ids = re.split(cve_pattern, sol_text)
 
@@ -76,6 +75,7 @@ def process_brcm_advisory(advisory_soup):
 		for prod_line in prod_lines:
 			affected_prods.append(prod_line.text.strip())
 
+	table_df = pd.DataFrame()
 	tables = advisory_soup.find_all('tbody')[1:] # Skip the first table which is not relevant
 
 	for table in tables:
@@ -92,10 +92,25 @@ def process_brcm_advisory(advisory_soup):
 			row_list.append(cell_list)
 		
 		header = row_list[0] # First row as header
-		df = pd.DataFrame(row_list[1:], columns=header) # Remaining rows as data
-		print(df)
+		table_new_df = pd.DataFrame(row_list[1:], columns=header) # Remaining rows as data
+		table_df = pd.concat([table_df, table_new_df], ignore_index=True)
 
-	print(vmsa, advisory_title, pub_date, upd_date, severity, cvss_score, cve_ids, affected_prods)
+	advisory_dict = {
+		"VMSA": [vmsa],
+		"Synopsis": [advisory_title],
+		"Issue date": [pub_date],
+		"Update date": [upd_date],
+		"Severity": [severity],
+		"CVSS Score": [cvss_score]
+	}
+	#advisory_df = pd.DataFrame(advisory_dict)
+
+	print(advisory_dict)
+	print(cve_ids)
+	print(affected_prods)
+	print(table_df)
+
+	return advisory_dict, cve_ids, affected_prods
 
 def main():
 	# Stop chained indexing from being attempted for Pandas pre v3.0
