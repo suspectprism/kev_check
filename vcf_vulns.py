@@ -8,8 +8,28 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import pandas as pd
+import openpyxl
+from config import load_config
+
+def read_sec_advisory_list(in_file):
+	'''Read the spreadsheet with a list of security advisories'''
+	wb = openpyxl.load_workbook(in_file)
+	ws = wb.active # Assume data is in the active sheet
+
+	advisory_URL_list = []
+
+	# Iterate through rows starting from the second row
+	for row_num in range(2, ws.max_row + 1):
+		cell = ws.cell(row=row_num, column=1) # Advisory ID is in the first column
+		try:
+			advisory_URL_list.append(cell.hyperlink.target)
+		except AttributeError:
+			advisory_URL_list.append(None)
+
+	return advisory_URL_list
 
 def process_brcm_advisory(advisory_soup):
+	'''Process a Broadcom advisory page and extract vulnerability details'''
 	cvss_pattern = r'[- ]+' # Regex pattern to split CVSS scores on hyphens and spaces (one or more times)
 	cve_pattern = r'[, ]+' # Regex pattern to split CVEs on commas and spaces (one or more times)
 
@@ -78,9 +98,19 @@ def process_brcm_advisory(advisory_soup):
 	print(vmsa, advisory_title, pub_date, upd_date, severity, cvss_score, cve_ids, affected_prods)
 
 def main():
+	# Stop chained indexing from being attempted for Pandas pre v3.0
+	pd.options.mode.copy_on_write = True
+
+	# Open config file
+	config_path = "config.yaml"
+	config_dict = load_config(config_path)
+
+	# Get the list of security advisory URLs from the input spreadsheet
+	in_file = config_dict['in_fn']
+	advisory_list = read_sec_advisory_list(in_file)
+
 	# Fetch a sample VCF advisory page
-	advisory_url = 'https://support.broadcom.com/web/ecx/support-content-notification/-/external/content/SecurityAdvisories/0/36149'
-	response = requests.get(advisory_url)
+	response = requests.get(advisory_list[0])
 	advisory_content = response.text
 
 	advisory_soup = BeautifulSoup(advisory_content, 'html.parser')
