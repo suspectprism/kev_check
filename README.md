@@ -8,8 +8,9 @@ Uses config.py. Requires beautifulsoup, requests, pandas and openpyxl
 
 # 2. kev.py
 Download the latest CISA KEV list.
-- Download new KEV changes compared to the local version of the list.
+- Download new KEV changes compared to the local version of the list
 - Check specifically for Broadcom or VMware as vendor
+- Notify to private Discord channel if there is an updated KEV list
 
 Uses config.py. Requires requests, openpyxl, colorama.
 
