@@ -14,6 +14,6 @@ Download the latest CISA KEV list.
 
 Uses config.py. Requires requests, openpyxl, colorama.
 
-N.B. *requests* stopped working with an SSL error.
+N.B. *requests* stopped working with an SSL error. (Windows)
 
 Resolved with: `uv pip install pip-system-certs`

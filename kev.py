@@ -4,7 +4,7 @@
 # If KEV list is updated then notify to a private Discord channel
 #
 #
-# P Dowley   v0.2      23 Dec 2025
+# P Dowley   v0.2.1      2 Jan 2026
 
 import requests
 import sys
@@ -49,7 +49,7 @@ def notify_to_discord(saved_summary_dict, kev_data, vmw_count, webhook_url):
 
     return
 
-def check_kev_updates(kev_data, kev_in_path, webhook_url):
+def check_kev_updates(kev_header, vulns_list, kev_in_path, webhook_url):
     '''Check if there are any new KEV vulnerabilities since the last saved KEV file'''
     # Load existing KEV data from local Excel file
     wb = openpyxl.load_workbook(kev_in_path)
@@ -73,9 +73,6 @@ def check_kev_updates(kev_data, kev_in_path, webhook_url):
         if key is not None:
             saved_summary_dict[name_dict[key]] = value
 
-    # Remove the vulnerabilities list from the main dictionary for separate processing
-    vulns_list = kev_data.pop("vulnerabilities")
-
     vmw_count = 0
     for vuln in vulns_list:
         if vuln["vendorProject"] in ["Broadcom", "VMware", "VMware Tanzu"]:
@@ -87,24 +84,24 @@ def check_kev_updates(kev_data, kev_in_path, webhook_url):
           f"VMW/BRCM: {saved_summary_dict['vmwCount']}")
 
     # Compare catalog versions and dates to determine if KEV list has been updated
-    if kev_data["catalogVersion"] != saved_summary_dict['catalogVersion'] or kev_data["dateReleased"] != saved_summary_dict["dateReleased"]:
-        print(f"Latest KEV catalog version: {Fore.GREEN}{kev_data['catalogVersion']}{Style.RESET_ALL}, "
-              f"date: {Fore.GREEN}{kev_data['dateReleased']}{Style.RESET_ALL}, "
-              f"count: {Fore.YELLOW}{kev_data['count']}{Style.RESET_ALL}, "
+    if kev_header["catalogVersion"] != saved_summary_dict['catalogVersion'] or kev_header["dateReleased"] != saved_summary_dict["dateReleased"]:
+        print(f"Latest KEV catalog version: {Fore.GREEN}{kev_header['catalogVersion']}{Style.RESET_ALL}, "
+              f"date: {Fore.GREEN}{kev_header['dateReleased']}{Style.RESET_ALL}, "
+              f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
               f"VMW/BRCM: {vmw_count}")
         
-        notify_to_discord(saved_summary_dict, kev_data, vmw_count, webhook_url)
+        notify_to_discord(saved_summary_dict, kev_header, vmw_count, webhook_url)
 
         return True
     else:
-        print(f"Latest KEV catalog version: {kev_data["catalogVersion"]}, "
-              f"date: {kev_data["dateReleased"]}, "
-              f"count: {kev_data["count"]}, "
+        print(f"Latest KEV catalog version: {kev_header["catalogVersion"]}, "
+              f"date: {kev_header["dateReleased"]}, "
+              f"count: {kev_header["count"]}, "
               f"VMW/BRCM: {vmw_count}")
         
         return False
 
-def save_kev_to_excel(kev_data, kev_in_fn, kev_out_path):
+def save_kev_to_excel(kev_header, vulns_list, kev_in_fn, kev_out_path):
     '''Save KEV data to an Excel spreadsheet'''
 
     # Mapping of KEV header names to more user-friendly names, for the summary sheet
@@ -115,15 +112,12 @@ def save_kev_to_excel(kev_data, kev_in_fn, kev_out_path):
         "count": "Count of Vulnerabilities"
     }
 
-    # Remove the vulnerabilities list from the main dictionary for separate processing
-    vulns_list = kev_data.pop("vulnerabilities")
-
     wb = openpyxl.Workbook()
     
     # Write summary information to the default sheet
     summary_ws = wb.active
     summary_ws.title = "Summary"
-    for key, value in kev_data.items():
+    for key, value in kev_header.items():
         name = name_dict[key] if key in name_dict else key
         summary_ws.append([name, value])
     summary_ws.append(["Count of VMware/BRCM vulns", 0])  # Placeholder for VMware/Broadcom vuln count
@@ -213,6 +207,10 @@ def main():
     kev_url = config_dict['kev']['kev_url']
     kev_data = get_kev_data(kev_url)
 
+    # Remove the vulnerabilities list from the main dictionary for separate processing
+    vulns_list = kev_data.pop("vulnerabilities")
+    kev_header = kev_data
+
     # Retrieve local saved KEV spreadsheet if it exists
     kev_in_fn = config_dict['kev']['in_fn']
     kev_in_path = Path(kev_in_fn)
@@ -221,17 +219,17 @@ def main():
     if kev_in_path.is_file():   # A saved KEV file exists
 
         # Check if the KEV list has been updated since last run, and notify via Discord webhook if changed
-        kev_updated = check_kev_updates(kev_data, kev_in_path, config_dict['kev']['webhook_url'])
+        kev_updated = check_kev_updates(kev_header, vulns_list, kev_in_path, config_dict['kev']['webhook_url'])
         if kev_updated:
             # The KEV list has been updated so we need to save the new KEV data
-            save_kev_to_excel(kev_data, kev_in_fn, kev_out_path)
+            save_kev_to_excel(kev_header, vulns_list, kev_in_fn, kev_out_path)
         else:
             print("No changes to KEV list.")
 
     else:
         # We don't have a previously saved KEV file so we need to save one
         print("Saving KEV data to local Excel spreadsheet...")
-        save_kev_to_excel(kev_data, kev_in_fn, kev_out_path)
+        save_kev_to_excel(kev_header, vulns_list, kev_in_fn, kev_out_path)
 
 if __name__ == "__main__":
     main()
