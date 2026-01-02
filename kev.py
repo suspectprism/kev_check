@@ -4,7 +4,7 @@
 # If KEV list is updated then notify to a private Discord channel
 #
 #
-# P Dowley   v0.2.1      2 Jan 2026
+# P Dowley   v0.2.2      2 Jan 2026
 
 import requests
 import sys
@@ -49,7 +49,7 @@ def notify_to_discord(saved_summary_dict, kev_data, vmw_count, webhook_url):
 
     return
 
-def check_kev_updates(kev_header, vulns_list, kev_in_path, webhook_url):
+def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webhook_url):
     '''Check if there are any new KEV vulnerabilities since the last saved KEV file'''
     # Load existing KEV data from local Excel file
     wb = openpyxl.load_workbook(kev_in_path)
@@ -89,8 +89,11 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, webhook_url):
               f"date: {Fore.GREEN}{kev_header['dateReleased']}{Style.RESET_ALL}, "
               f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
               f"VMW/BRCM: {vmw_count}")
-        
-        notify_to_discord(saved_summary_dict, kev_header, vmw_count, webhook_url)
+
+        if notify_discord:
+            notify_to_discord(saved_summary_dict, kev_header, vmw_count, webhook_url)
+        else:
+            print("Notification to Discord is not required.")
 
         return True
     else:
@@ -219,7 +222,7 @@ def main():
     if kev_in_path.is_file():   # A saved KEV file exists
 
         # Check if the KEV list has been updated since last run, and notify via Discord webhook if changed
-        kev_updated = check_kev_updates(kev_header, vulns_list, kev_in_path, config_dict['kev']['webhook_url'])
+        kev_updated = check_kev_updates(kev_header, vulns_list, kev_in_path, config_dict['kev']['notify'], config_dict['kev']['webhook_url'])
         if kev_updated:
             # The KEV list has been updated so we need to save the new KEV data
             save_kev_to_excel(kev_header, vulns_list, kev_in_fn, kev_out_path)
