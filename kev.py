@@ -14,7 +14,7 @@ import requests
 import sys
 from pathlib import Path
 import openpyxl
-from datetime import date
+from datetime import date, datetime
 import shutil
 from colorama import Fore, Style
 from config import load_config
@@ -33,11 +33,19 @@ def get_kev_data(kev_url):
 def notify_to_discord(saved_summary_dict, kev_data, vend_name, vend_count, webhook_url):
     '''Send message to private Discord channel via webhook to notify of KEV updates'''
 
+    # Convert string with ISO format date to a datetime
+    saved_release_dt = datetime.fromisoformat(saved_summary_dict['dateReleased'].replace("Z", "+00:00"))
+    saved_release_str = f"{saved_release_dt:%Y-%m-%d %H:%M:%S}"  # Reformat this as a more readable string for message
+
+    # Convert string with ISO format date to a datetime
+    kev_release_dt = datetime.fromisoformat(kev_data['dateReleased'].replace("Z", "+00:00"))
+    kev_release_str = f"{kev_release_dt:%Y-%m-%d %H:%M:%S}"  # Reformat this as a more readable string for message
+
     msg_data = {
-        "content": f" Saved date: {saved_summary_dict['dateReleased']}, "
+        "content": f" Saved date: {saved_release_str}, "
           f"count: {saved_summary_dict['count']}, "
           f" {vend_name}: {saved_summary_dict['vendCount']}\n"
-          f"Latest date: {kev_data['dateReleased']}, "
+          f"Latest date: {kev_release_str}, "
           f"count: {kev_data['count']}, "
           f" {vend_name}: {vend_count}"
     }
@@ -55,6 +63,11 @@ def notify_to_discord(saved_summary_dict, kev_data, vend_name, vend_count, webho
 
 def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webhook_url, vendor_list, vendor_name):
     '''Check if there are any new KEV vulnerabilities since the last saved KEV file'''
+
+    # Convert string with ISO format date to a datetime
+    kev_release_dt = datetime.fromisoformat(kev_header['dateReleased'].replace("Z", "+00:00"))
+    kev_release_str = f"{kev_release_dt:%Y-%m-%d %H:%M:%S}"  # Reformat this as a more readable string for console output
+
     # Load existing KEV data from local Excel file
     wb = openpyxl.load_workbook(kev_in_path)
     ws = wb["Summary"]  # Open the summary sheet to compare header info from KEV data
@@ -78,22 +91,34 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
         if key is not None:
             saved_summary_dict[name_dict[key]] = value
 
+    # Convert string with ISO format date to a datetime
+    saved_release_dt = datetime.fromisoformat(saved_summary_dict['dateReleased'].replace("Z", "+00:00"))
+    saved_release_str = f"{saved_release_dt:%Y-%m-%d %H:%M:%S}"  # Reformat this as a more readable string for console output
+
     vend_count = 0
     for vuln in vulns_list:
         if vuln["vendorProject"] in vendor_list:
             vend_count += 1
 
     print(f" Saved KEV catalog version: {saved_summary_dict['catalogVersion']}, "
-          f"date: {saved_summary_dict['dateReleased']}, "
+          f"date: {saved_release_str}, "
           f"count: {saved_summary_dict['count']}, "
           f"{vendor_name}: {saved_summary_dict['vendCount']}")
 
     # Compare catalog versions and dates to determine if KEV list has been updated
     if kev_header["catalogVersion"] != saved_summary_dict['catalogVersion'] or kev_header["dateReleased"] != saved_summary_dict["dateReleased"]:
-        print(f"Latest KEV catalog version: {Fore.GREEN}{kev_header['catalogVersion']}{Style.RESET_ALL}, "
-              f"date: {Fore.GREEN}{kev_header['dateReleased']}{Style.RESET_ALL}, "
-              f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
-              f"{vendor_name}: {vend_count}")
+        if saved_summary_dict['vendCount'] == vend_count:
+            # Highlight the overall KEV count in yellow because it has changed
+            print(f"Latest KEV catalog version: {Fore.GREEN}{kev_header['catalogVersion']}{Style.RESET_ALL}, "
+                  f"date: {Fore.GREEN}{kev_release_str}{Style.RESET_ALL}, "
+                  f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
+                  f"{vendor_name}: {vend_count}")
+        else:
+            # Vendor vuln count has changed so highlight this in yellow too
+            print(f"Latest KEV catalog version: {Fore.GREEN}{kev_header['catalogVersion']}{Style.RESET_ALL}, "
+                  f"date: {Fore.GREEN}{kev_release_str}{Style.RESET_ALL}, "
+                  f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
+                  f"{vendor_name}: {Fore.RED}{vend_count}{Style.RESET_ALL}")
 
         if notify_discord:
             notify_to_discord(saved_summary_dict, kev_header, vendor_name, vend_count, webhook_url)
@@ -103,7 +128,7 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
         return True
     else:
         print(f"Latest KEV catalog version: {kev_header["catalogVersion"]}, "
-              f"date: {kev_header["dateReleased"]}, "
+              f"date: {kev_release_str}, "
               f"count: {kev_header["count"]}, "
               f"{vendor_name}: {vend_count}")
         
