@@ -21,10 +21,13 @@ A notification is sent to a Discord channel if required.
 Finally the local reference spreadsheet in the input folder is replaced with a copy of the new spreadsheet.
 
 ## Initial setup
-1. Create separate input and output folders for the script to use.
+
+### Data file locations
+Create separate input and output folders for the script to use.
 For example, */data/kev_search/in* and */data/kev_search/out*
 
-2. Create a config.yaml file based on the template. (Include config.yaml in your .gitignore file.)
+### config.yaml
+Create a config.yaml file based on the template. (Include config.yaml in your .gitignore file.)
 Update the *in_fn* and *out_path* values to match the folder names that were created in the previous step.
 
 Update the *vendor_name* value with the name of the extra sheet to be created in the output spreadsheet. For example "VMware".
@@ -32,14 +35,17 @@ Update the *vendor_name* value with the name of the extra sheet to be created in
 Update the *vendor_list* value to be a list including one or more vendorProject values from the CISA KEV data.
 For example: ["Broadcom", "VMware", "VMware Tanzu"] to collate the subset of KEV vulnerabilities that are for VMware software.
 
-3. To send a notification to Discord if there have been changes, setup an appropriate Discord channel and get the webhook URL.
+### Discord notifications
+To send a notification to Discord if there have been changes, setup an appropriate Discord channel and get the webhook URL.
 Set the channel's webhook URL in the *webhook_url* entry in config.yaml.
 
 Update the *notify* value from *false* to *true*.
 
-4. Run the script using uv for dependency management:
+### Running the script
+Run the script using uv for dependency management:
     `uv run python kev.py`
 
+Once the script is working it can be included in a crontab to run it daily.
 
 ## Issues
 Using this script on a Windows computer initally worked fine, but at one stage *requests* stopped working with an SSL error.
