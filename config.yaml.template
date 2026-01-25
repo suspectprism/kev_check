@@ -1,0 +1,6 @@
+kev:
+  kev_url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+  webhook_url: "https://discord.com/api/webhooks/<YOUR_WEBHOOK_TOKEN>"
+  notify: false
+  in_fn: "/<in_folder_path>/CISA_KEV.xlsx"
+  out_path: "/<out_folder_path>/"
