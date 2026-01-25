@@ -22,7 +22,7 @@ Finally the local reference spreadsheet in the input folder is replaced with a c
 
 ### Data file locations
 Create separate input and output folders for the script to use.
-For example, */data/kev_search/in* and */data/kev_search/out*
+For example, */data/kev_check/in* and */data/kev_check/out*
 
 ### config.yaml
 Create a config.yaml file based on the template. (Include config.yaml in your .gitignore file.)
