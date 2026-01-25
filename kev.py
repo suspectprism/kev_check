@@ -5,7 +5,7 @@
 #
 # v0.2 If KEV list is updated then notify to a private Discord channel
 #
-# v0.3 Support use of a generic vendor name to check for vendor vulns
+# v0.3 Support use of a generic (instead of hard-coded) vendor when checking for vendor vulns
 #
 #
 # P Dowley   v0.3      25 Jan 2026
