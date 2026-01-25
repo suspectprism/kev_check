@@ -4,8 +4,6 @@ Download the latest CISA KEV list.
 - Check specifically for vulnerabilities in the KEV list that are for a specific vendor
 - Notify to private Discord channel if there is an updated KEV list
 
-Uses config.py. Requires requests, openpyxl, colorama.
-
 ## How it works
 When the script is run for the first time it creates a local spreadsheet which contains the KEV list data.
 This local reference spreadsheet is stored in the input folder for the script.
