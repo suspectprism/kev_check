@@ -6,11 +6,12 @@
 # v0.2 If KEV list is updated then notify to a private Discord channel
 #
 # v0.3 Support use of a generic (instead of hard-coded) vendor when checking for vendor vulns
-#
+#      Improved formatting of Discord notification message
 #
 # P Dowley   v0.3      25 Jan 2026
 
 import requests
+from discord_webhook import DiscordWebhook, DiscordEmbed
 import sys
 from pathlib import Path
 import openpyxl
@@ -35,25 +36,48 @@ def notify_to_discord(saved_summary_dict, kev_data, vend_name, vend_count, webho
 
     # Convert string with ISO format date to a datetime
     saved_release_dt = datetime.fromisoformat(saved_summary_dict['dateReleased'].replace("Z", "+00:00"))
-    saved_release_str = f"{saved_release_dt:%Y-%m-%d %H:%M:%S}"  # Reformat this as a more readable string for message
+    saved_release_str = f"{saved_release_dt:%Y-%m-%d}"  # Reformat this as a simple date string for Discord message
 
     # Convert string with ISO format date to a datetime
     kev_release_dt = datetime.fromisoformat(kev_data['dateReleased'].replace("Z", "+00:00"))
-    kev_release_str = f"{kev_release_dt:%Y-%m-%d %H:%M:%S}"  # Reformat this as a more readable string for message
+    kev_release_str = f"{kev_release_dt:%Y-%m-%d}"  # Reformat this as a simple date string for Discord message
 
-    msg_data = {
-        "content": f" Saved date: {saved_release_str}, "
-          f"count: {saved_summary_dict['count']}, "
-          f" {vend_name}: {saved_summary_dict['vendCount']}\n"
-          f"Latest date: {kev_release_str}, "
-          f"count: {kev_data['count']}, "
-          f" {vend_name}: {vend_count}"
-    }
+    prev_str = (
+        f"Date: {saved_release_str}, "
+        f"count: {saved_summary_dict['count']},\n "
+        f"{vend_name}: {saved_summary_dict['vendCount']}"
+    )
 
-    # Make a POST request to the Discord webhook URL
-    response = requests.post(webhook_url, json= msg_data)
+    if vend_count == saved_summary_dict['vendCount']:
+        # Vendor vuln count has not changed
+        vend_count_bold = ""
+    else:
+        # Vendor vuln count has changed so highlight this in bold
+        vend_count_bold = "**"
 
-    if response.status_code == 204: # Discord returns 204 / No Content for successful webhook posts
+    latest_str = (
+        f"Date: {kev_release_str}, "
+        f"count: **{kev_data['count']}**,\n"
+        f"{vend_name}: {vend_count_bold}{vend_count}{vend_count_bold}"
+    )
+
+    webhook = DiscordWebhook(url=webhook_url)
+
+    embed = DiscordEmbed(title="CISA KEV List updated",
+                         color='03b2f8')  # Blue colour for embed
+
+    embed.add_embed_field(name="Previous KEV",
+                         value=prev_str, inline=False)
+    
+    embed.add_embed_field(name="Latest KEV",
+                          value=latest_str, inline=False)
+
+    webhook.add_embed(embed)
+
+    # Submit message to the Discord webhook URL
+    response = webhook.execute()
+
+    if response.status_code == 200: # Discord returns 200 for successful webhook posts
         print("Notification to Discord sent successfully.")
     else:
         print(f"Failed to send notification. Status code: {response.status_code}")
@@ -114,7 +138,7 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
                   f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
                   f"{vendor_name}: {vend_count}")
         else:
-            # Vendor vuln count has changed so highlight this in yellow too
+            # Vendor vuln count has changed so highlight this too
             print(f"Latest KEV catalog version: {Fore.GREEN}{kev_header['catalogVersion']}{Style.RESET_ALL}, "
                   f"date: {Fore.GREEN}{kev_release_str}{Style.RESET_ALL}, "
                   f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
