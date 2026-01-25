@@ -7,6 +7,7 @@
 #
 # v0.3 Support use of a generic (instead of hard-coded) vendor when checking for vendor vulns
 #      Improved formatting of Discord notification message
+#      List new vulnerabilities in Discord message
 #
 # P Dowley   v0.3      25 Jan 2026
 
@@ -31,7 +32,7 @@ def get_kev_data(kev_url):
         print(f"Error retrieving KEV data from {kev_url}: {e}")
         sys.exit(1)  # Exit on error with a non-zero status
 
-def notify_to_discord(saved_summary_dict, kev_data, vend_name, vend_count, webhook_url):
+def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_count, webhook_url):
     '''Send message to private Discord channel via webhook to notify of KEV updates'''
 
     # Convert string with ISO format date to a datetime
@@ -71,6 +72,22 @@ def notify_to_discord(saved_summary_dict, kev_data, vend_name, vend_count, webho
     
     embed.add_embed_field(name="Latest KEV",
                           value=latest_str, inline=False)
+
+    # New vulnerability details
+    num_new_vulns = int(kev_data['count']) - int(saved_summary_dict['count'])
+    vulns_str = ""
+    counter = 0
+    while counter < num_new_vulns:
+        vuln = vulns_list[counter]
+        vuln_str = vuln['cveID'] + " " +vuln['vendorProject'] + "\n" + vuln['product']
+        if counter == 0:
+            vulns_str = vuln_str
+        else:
+            vulns_str = vulns_str + "\n\n" + vuln_str
+        counter += 1
+
+    embed.add_embed_field(name=f"New vulnerabilities",
+                          value=vulns_str, inline=False)
 
     webhook.add_embed(embed)
 
@@ -145,7 +162,7 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
                   f"{vendor_name}: {Fore.RED}{vend_count}{Style.RESET_ALL}")
 
         if notify_discord:
-            notify_to_discord(saved_summary_dict, kev_header, vendor_name, vend_count, webhook_url)
+            notify_to_discord(saved_summary_dict, kev_header, vulns_list, vendor_name, vend_count, webhook_url)
         else:
             print("Notification to Discord is not required.")
 
