@@ -1,5 +1,5 @@
 # kev.py
-Download the latest CISA KEV list.
+Check for updates to the CISA KEV list.
 - Download new KEV changes compared to the local version of the list
 - Check specifically for vulnerabilities in the KEV list that are for a specific vendor
 - Notify to private Discord channel if there is an updated KEV list
