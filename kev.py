@@ -79,7 +79,7 @@ def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_
     counter = 0
     while counter < num_new_vulns:
         vuln = vulns_list[counter]
-        vuln_str = vuln['cveID'] + " " +vuln['vendorProject'] + "\n" + vuln['product']
+        vuln_str = vuln['cveID'] + " *" +vuln['vendorProject'] + "* - " + vuln['product']  # Asterisks around vendor name for italics in Discord markdown
         if counter == 0:
             vulns_str = vuln_str
         else:
