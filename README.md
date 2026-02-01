@@ -1,8 +1,14 @@
-# kev.py
-Check for updates to the CISA KEV list.
-- Download new KEV changes compared to the local version of the list
-- Check specifically for vulnerabilities in the KEV list that are for a specific vendor
-- Notify to private Discord channel if there is an updated KEV list
+# kev_check
+Checks for updates to the CISA KEV list compared to the last time that the script was run.
+
+If there are changes then notify to a private Discord channel, as shown below:
+
+<img src="./assets/CISA%20KEV%20notification%202026-01-29.jpg" width="400" />
+
+The Discord notification shows:
+- The number of KEVs (previous and current). The count shows in **bold** if it has increased.
+- The number of KEVs (previous and current) for a particular vendor that is being tracked. The count shows in **bold** if it has increased.
+- *Vendor* and product names for each new vulnerability in the KEV list.
 
 ## How it works
 When the script is run for the first time it creates a local spreadsheet which contains the KEV list data.
@@ -40,10 +46,10 @@ Set the channel's webhook URL in the *webhook_url* entry in config.yaml.
 Update the *notify* value from *false* to *true*.
 
 ### Running the script
-Run the script using uv for dependency management:
+It is recommended to run the script using **uv** for dependency management:
     `uv run python kev.py`
 
-Once the script is working it can be included in a crontab to run it daily.
+Once the script is working it can be scheduled to run daily (e.g. using crontab).
 
 ## Issues
 Using this script on a Windows computer initally worked fine, but at one stage *requests* stopped working with an SSL error.
