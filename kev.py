@@ -16,6 +16,8 @@ from discord_webhook import DiscordWebhook, DiscordEmbed
 import sys
 from pathlib import Path
 import openpyxl
+from openpyxl import styles
+from openpyxl import utils
 from datetime import date, datetime
 import shutil
 from colorama import Fore, Style
@@ -205,11 +207,11 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
     #Set cells B1 - B5 to bold text
     for row in summary_ws['B1:B5']:
         for cell in row:
-            cell.font = openpyxl.styles.Font(bold=True)
+            cell.font = styles.Font(bold=True)
 
     #Set left alignment for the Count cells
-    summary_ws['B4'].alignment = openpyxl.styles.Alignment(horizontal='left')
-    summary_ws['B5'].alignment = openpyxl.styles.Alignment(horizontal='left')
+    summary_ws['B4'].alignment = styles.Alignment(horizontal='left')
+    summary_ws['B5'].alignment = styles.Alignment(horizontal='left')
 
     # Write vulnerabilities information
     vulns_ws = wb.create_sheet(title="Vulns", index=1)
@@ -219,13 +221,13 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
 
     # Set header row to bold text
     for cell in vulns_ws[1]:
-        cell.font = openpyxl.styles.Font(bold=True)
+        cell.font = styles.Font(bold=True)
 
     # Set column widths for better readability
     col_widths = [15, 15, 20, 40, 10, 40, 15, 10, 20]
 
     for i, width in enumerate(col_widths, start=1):
-        vulns_ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
+        vulns_ws.column_dimensions[utils.get_column_letter(i)].width = width
 
     # Write KEV entries
     for item in vulns_list:
@@ -251,10 +253,10 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
     vend_vulns_ws.index = 2
 
     # Remove non-vendor entries from the vendor sheet
-    for row in range(vend_vulns_ws.max_row, 1, -1):
-        vendor_cell = vend_vulns_ws.cell(row=row, column=2)  # Vendor is in the second column
+    for row_ctr in range(vend_vulns_ws.max_row, 1, -1):
+        vendor_cell = vend_vulns_ws.cell(row=row_ctr, column=2)  # Vendor is in the second column
         if vendor_cell.value not in vendor_list:
-            vend_vulns_ws.delete_rows(row)
+            vend_vulns_ws.delete_rows(row_ctr)
 
     # Apply autofilter to the vendor sheet
     vend_vulns_ws.auto_filter.ref = vend_vulns_ws.dimensions
