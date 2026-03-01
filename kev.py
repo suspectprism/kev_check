@@ -9,13 +9,15 @@
 #      Improved formatting of Discord notification message
 #      List new vulnerabilities in Discord message
 #
-# P Dowley   v0.3      25 Jan 2026
+# P Dowley   v0.3.1      1 Mar 2026
 
 import requests
 from discord_webhook import DiscordWebhook, DiscordEmbed
 import sys
 from pathlib import Path
 import openpyxl
+from openpyxl import styles
+from openpyxl import utils
 from datetime import date, datetime
 import shutil
 from colorama import Fore, Style
@@ -86,7 +88,7 @@ def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_
             vulns_str = vulns_str + "\n\n" + vuln_str
         counter += 1
 
-    embed.add_embed_field(name=f"New vulnerabilities",
+    embed.add_embed_field(name="New vulnerabilities",
                           value=vulns_str, inline=False)
 
     webhook.add_embed(embed)
@@ -179,7 +181,7 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
     '''Save KEV data to an Excel spreadsheet'''
 
     # Mapping of KEV header names to more user-friendly names, for the summary sheet
-    name_dict = {
+    name_dict: dict = {
         "title": "Title",
         "catalogVersion": "Catalog Version",
         "dateReleased": "Date Released",
@@ -192,7 +194,7 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
     summary_ws = wb.active
     summary_ws.title = "Summary"
 
-    vend_header = "Count of " + vendor_name + " vulns"
+    vend_header:str = "Count of " + vendor_name + " vulns"
     for key, value in kev_header.items():
         name = name_dict[key] if key in name_dict else key
         summary_ws.append([name, value])
@@ -205,11 +207,11 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
     #Set cells B1 - B5 to bold text
     for row in summary_ws['B1:B5']:
         for cell in row:
-            cell.font = openpyxl.styles.Font(bold=True)
+            cell.font = styles.Font(bold=True)
 
     #Set left alignment for the Count cells
-    summary_ws['B4'].alignment = openpyxl.styles.Alignment(horizontal='left')
-    summary_ws['B5'].alignment = openpyxl.styles.Alignment(horizontal='left')
+    summary_ws['B4'].alignment = styles.Alignment(horizontal='left')
+    summary_ws['B5'].alignment = styles.Alignment(horizontal='left')
 
     # Write vulnerabilities information
     vulns_ws = wb.create_sheet(title="Vulns", index=1)
@@ -219,27 +221,27 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
 
     # Set header row to bold text
     for cell in vulns_ws[1]:
-        cell.font = openpyxl.styles.Font(bold=True)
+        cell.font = styles.Font(bold=True)
 
     # Set column widths for better readability
     col_widths = [15, 15, 20, 40, 10, 40, 15, 10, 20]
 
     for i, width in enumerate(col_widths, start=1):
-        vulns_ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
+        vulns_ws.column_dimensions[utils.get_column_letter(i)].width = width
 
     # Write KEV entries
     for item in vulns_list:
-        cve_id = item.get("cveID", "")
-        vendor = item.get("vendorProject", "")
-        product = item.get("product", "")
-        vuln_name = item.get("vulnerabilityName", "")
+        cve_id: str = item.get("cveID", "")
+        vendor: str = item.get("vendorProject", "")
+        product: str = item.get("product", "")
+        vuln_name: str = item.get("vulnerabilityName", "")
         date_added = item.get("dateAdded", "")
-        short_desc = item.get("shortDescription", "")
-        reqd_action = item.get("requiredAction", "")
+        short_desc:str = item.get("shortDescription", "")
+        reqd_action:str = item.get("requiredAction", "")
         due_date = item.get("dueDate", "")
         ransomware_campaign = item.get("knownRansomwareCampaignUse", False)
 
-        row = [cve_id, vendor, product, vuln_name, date_added, short_desc, reqd_action, due_date, ransomware_campaign]
+        row:list = [cve_id, vendor, product, vuln_name, date_added, short_desc, reqd_action, due_date, ransomware_campaign]
         vulns_ws.append(row)
 
     # Apply autofilter to the vulnerabilities sheet
@@ -251,10 +253,10 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
     vend_vulns_ws.index = 2
 
     # Remove non-vendor entries from the vendor sheet
-    for row in range(vend_vulns_ws.max_row, 1, -1):
-        vendor_cell = vend_vulns_ws.cell(row=row, column=2)  # Vendor is in the second column
+    for row_ctr in range(vend_vulns_ws.max_row, 1, -1):
+        vendor_cell = vend_vulns_ws.cell(row=row_ctr, column=2)  # Vendor is in the second column
         if vendor_cell.value not in vendor_list:
-            vend_vulns_ws.delete_rows(row)
+            vend_vulns_ws.delete_rows(row_ctr)
 
     # Apply autofilter to the vendor sheet
     vend_vulns_ws.auto_filter.ref = vend_vulns_ws.dimensions
@@ -280,7 +282,7 @@ def main():
     config_dict = load_config(config_path)
 
     # Retrieve KEV list from CISA website
-    kev_url = config_dict['kev']['kev_url']
+    kev_url:str = config_dict['kev']['kev_url']
     kev_data = get_kev_data(kev_url)
 
     # Remove the vulnerabilities list from the main dictionary for separate processing
@@ -288,14 +290,14 @@ def main():
     kev_header = kev_data
 
     # Path for saved KEV spreadsheet if it exists
-    kev_in_fn = config_dict['kev']['in_fn']
+    kev_in_fn:str = config_dict['kev']['in_fn']
     kev_in_path = Path(kev_in_fn)
     # Path for output KEV spreadsheet
-    kev_out_path = config_dict['kev']['out_path']
+    kev_out_path:str = config_dict['kev']['out_path']
 
     # Vendor references from config
-    vend_list = config_dict['kev']['vendor_list']
-    vend_name = config_dict['kev']['vendor_name']
+    vend_list:list = config_dict['kev']['vendor_list']
+    vend_name:str = config_dict['kev']['vendor_name']
 
     if kev_in_path.is_file():   # A saved KEV file exists
 
