@@ -7,3 +7,9 @@ repos:
       entry: ty check
       language: system
       types: [python]
+    # Run the linter (check for style issues)
+    - id: ruff-check
+      name: ruff check
+      entry: ruff check
+      language: system
+      types: [python]

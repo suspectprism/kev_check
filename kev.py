@@ -88,7 +88,7 @@ def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_
             vulns_str = vulns_str + "\n\n" + vuln_str
         counter += 1
 
-    embed.add_embed_field(name=f"New vulnerabilities",
+    embed.add_embed_field(name="New vulnerabilities",
                           value=vulns_str, inline=False)
 
     webhook.add_embed(embed)
