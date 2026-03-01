@@ -1,6 +1,6 @@
 [project]
 name = "kev_check"
-version = "0.2.2"
+version = "0.3.1"
 description = "Check for updates to CISA Known Exploited Vulnerabilities list"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -8,6 +8,12 @@ dependencies = [
     "colorama>=0.4.6",
     "discord-webhook>=1.4.1",
     "openpyxl>=3.1.5",
+    "pre-commit>=4.5.1",
     "pyyaml>=6.0.3",
     "requests>=2.32.5",
+]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.19",
 ]

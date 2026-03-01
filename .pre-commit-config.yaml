@@ -1,0 +1,9 @@
+repos:
+- repo: local
+  hooks:
+    # Run the type checker (check for errors and warnings)
+    - id: ty
+      name: ty check
+      entry: ty check
+      language: system
+      types: [python]
