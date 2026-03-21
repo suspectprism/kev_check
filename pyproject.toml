@@ -1,6 +1,6 @@
 [project]
 name = "kev_check"
-version = "0.4.0"
+version = "0.5.0"
 description = "Check for updates to CISA Known Exploited Vulnerabilities list"
 readme = "README.md"
 requires-python = ">=3.14"
