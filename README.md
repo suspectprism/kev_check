@@ -8,7 +8,7 @@ If there are changes then notify to a private Discord channel, as shown below:
 The Discord notification shows:
 - The number of KEVs (previous and current). The count shows in **bold** if it has increased.
 - The number of KEVs (previous and current) for a particular vendor that is being tracked. The count shows in **bold** if it has increased.
-- *Vendor* and product names for each new vulnerability in the KEV list.
+- Vendor and product names for each new vulnerability in the KEV list.
 
 ## How it works
 When the script is run for the first time it creates a local spreadsheet which contains the KEV list data.
@@ -21,7 +21,7 @@ The reference spreadsheet has three tabs:
 
 On subsequent runs, the script checks if there are changes to the number of KEV entries compared to the saved sheet.
 If the KEV list has changed then a new spreadsheet is created in the output folder during processing.
-A notification is sent to a Discord channel if required.
+A notification is sent to a Discord channel if required. This reports on all new vulnerabilities that weren't in the previous saved KEV list.
 Finally the local reference spreadsheet in the input folder is replaced with a copy of the new spreadsheet.
 
 ## Initial setup
