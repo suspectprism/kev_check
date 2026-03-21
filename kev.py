@@ -9,7 +9,10 @@
 #      Improved formatting of Discord notification message
 #      List new vulnerabilities in Discord message
 #
-# P Dowley   v0.3.1      1 Mar 2026
+# v0.4 Compare new vulns against previous stored vulns, for reporting to Discord.
+#      Allows for CISA changing the order of reported vulnerabilities in the KEV list.
+#
+# P Dowley   v0.4      21 Mar 2026
 
 import requests
 from discord_webhook import DiscordWebhook, DiscordEmbed
@@ -34,7 +37,7 @@ def get_kev_data(kev_url):
         print(f"Error retrieving KEV data from {kev_url}: {e}")
         sys.exit(1)  # Exit on error with a non-zero status
 
-def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_count, webhook_url):
+def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_count, webhook_url, saved_cve_ids):
     '''Send message to private Discord channel via webhook to notify of KEV updates'''
 
     # Convert string with ISO format date to a datetime
@@ -75,18 +78,12 @@ def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_
     embed.add_embed_field(name="Latest KEV",
                           value=latest_str, inline=False)
 
-    # New vulnerability details
-    num_new_vulns = int(kev_data['count']) - int(saved_summary_dict['count'])
-    vulns_str = ""
-    counter = 0
-    while counter < num_new_vulns:
-        vuln = vulns_list[counter]
-        vuln_str = vuln['cveID'] + " *" +vuln['vendorProject'] + "* - " + vuln['product']  # Asterisks around vendor name for italics in Discord markdown
-        if counter == 0:
-            vulns_str = vuln_str
-        else:
-            vulns_str = vulns_str + "\n\n" + vuln_str
-        counter += 1
+    # New vulnerability details — compare against saved CVE IDs for accuracy
+    new_vulns = [v for v in vulns_list if v['cveID'] not in saved_cve_ids]
+    vulns_str = "\n\n".join(
+        v['cveID'] + " *" + v['vendorProject'] + "* - " + v['product']
+        for v in new_vulns
+    ) or "None identified"
 
     embed.add_embed_field(name="New vulnerabilities",
                           value=vulns_str, inline=False)
@@ -114,6 +111,9 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
     # Load existing KEV data from local Excel file
     wb = openpyxl.load_workbook(kev_in_path)
     ws = wb["Summary"]  # Open the summary sheet to compare header info from KEV data
+
+    # Read saved CVE IDs for accurate new-vuln detection
+    saved_cve_ids = {row[0] for row in wb["Vulns"].iter_rows(min_row=2, values_only=True) if row[0] is not None}
 
     # Mapping of spreadsheet header names to KEV header names
     vend_header = "Count of " + vendor_name + " vulns"
@@ -164,7 +164,7 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
                   f"{vendor_name}: {Fore.RED}{vend_count}{Style.RESET_ALL}")
 
         if notify_discord:
-            notify_to_discord(saved_summary_dict, kev_header, vulns_list, vendor_name, vend_count, webhook_url)
+            notify_to_discord(saved_summary_dict, kev_header, vulns_list, vendor_name, vend_count, webhook_url, saved_cve_ids)
         else:
             print("Notification to Discord is not required.")
 
