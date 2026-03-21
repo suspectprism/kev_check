@@ -12,7 +12,9 @@
 # v0.4 Compare new vulns against previous stored vulns, for reporting to Discord.
 #      Allows for CISA changing the order of reported vulnerabilities in the KEV list.
 #
-# P Dowley   v0.4      21 Mar 2026
+# v0.5 Optionally download VulnCheck KEV list from VulnCheck API and save updated data to the spreadsheet.
+#
+# P Dowley   v0.5      21 Mar 2026
 
 import requests
 from discord_webhook import DiscordWebhook, DiscordEmbed
@@ -26,16 +28,179 @@ import shutil
 from colorama import Fore, Style
 from config import load_config
 
-def get_kev_data(kev_url):
+def get_cisa_kev_data(kev_url):
     '''Fetch KEV data from the CISA website'''
     try:
         response = requests.get(kev_url)
         response.raise_for_status()  # Raise an error for bad status codes
         kev_data = response.json()  # Parse the JSON content into a Python dictionary
+        print("CISA KEV data downloaded successfully.")
         return kev_data
     except requests.exceptions.RequestException as e:
-        print(f"Error retrieving KEV data from {kev_url}: {e}")
+        print(f"Error retrieving CISA KEV data from {kev_url}: {e}")
         sys.exit(1)  # Exit on error with a non-zero status
+
+def get_vc_kev_data(vc_url, vc_token):
+    '''Fetch all KEV data from the VulnCheck API using cursor-based pagination'''
+    try:
+        headers = {"Authorization": f"Bearer {vc_token}"}
+        all_data = []
+        meta = {}
+
+        # First page
+        params = {"start_cursor": "true", "limit": 500}
+        response = requests.get(vc_url, headers=headers, params=params)
+        response.raise_for_status()
+        result = response.json()
+        all_data.extend(result.get("data") or [])
+        meta = result.get("_meta") or result.get("meta") or {}
+
+        # Subsequent pages
+        while meta.get("next_cursor"):
+            params = {"cursor": meta["next_cursor"]}
+            response = requests.get(vc_url, headers=headers, params=params)
+            response.raise_for_status()
+            result = response.json()
+            all_data.extend(result.get("data") or [])
+            meta = result.get("_meta") or result.get("meta") or {}
+
+        print("VulnCheck KEV data downloaded successfully.")
+
+        return {"_meta": meta, "data": all_data}
+    except requests.exceptions.RequestException as e:
+        print(f"Error retrieving VulnCheck KEV data from {vc_url}: {e}")
+        sys.exit(1)
+
+def write_vc_sheets(wb, vc_meta, vc_data, summary_ws, vendor_list, vendor_name):
+    '''Add VC summary rows to the Summary sheet and add/replace VC_Vulns and VC_<vendor> sheets'''
+
+    # Remove existing VC sheets if present (e.g. on a refresh run)
+    vc_vend_sheet = "VC_" + vendor_name
+    for sheet_name in ("VC_Vulns", vc_vend_sheet):
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
+
+    # Write VC metadata into the Summary sheet at rows 7-9 (row 6 is a blank separator)
+    vc_summary_rows = [
+        (7, "VC Title",                    vc_meta.get("index", "")),
+        (8, "VC Timestamp",                vc_meta.get("timestamp", "")),
+        (9, "VC Count of Vulnerabilities", len(vc_data)),
+    ]
+    for row_num, label, value in vc_summary_rows:
+        summary_ws.cell(row=row_num, column=1).value = label
+        cell_b = summary_ws.cell(row=row_num, column=2)
+        cell_b.value = value
+        cell_b.font = styles.Font(bold=True)
+    summary_ws['B9'].alignment = styles.Alignment(horizontal='left')
+
+    # VC_Vulns sheet
+    vc_vulns_ws = wb.create_sheet(title="VC_Vulns")
+
+    headers = [
+        "CVE ID", "Vendor", "Product", "Vulnerability Name", "CWEs",
+        "Date Added (VC)", "CISA Date Added", "Due Date",
+        "Short Description", "Required Action",
+        "Ransomware Campaign", "Canary Exploitation",
+        "XDB Exploit URLs", "Reported Exploitation URLs",
+    ]
+    vc_vulns_ws.append(headers)
+
+    for cell in vc_vulns_ws[1]:
+        cell.font = styles.Font(bold=True)
+
+    col_widths = [15, 15, 20, 40, 15, 12, 12, 12, 40, 40, 20, 20, 50, 50]
+    for i, width in enumerate(col_widths, start=1):
+        vc_vulns_ws.column_dimensions[utils.get_column_letter(i)].width = width
+
+    def _iso_date(value):
+        '''Parse a timestamp string and return a yyyy-mm-dd string, or "" if empty'''
+        if not value:
+            return ""
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime("%Y-%m-%d")
+        except ValueError:
+            return str(value)
+
+    for item in vc_data:
+        cve_ids = ", ".join(item.get("cve") or [])
+        cwes    = ", ".join(item.get("cwes") or [])
+        xdb_urls = ", ".join(
+            e.get("xdb_url", "") for e in (item.get("vulncheck_xdb") or [])
+        )
+        exploitation_urls = ", ".join(
+            e.get("url", "") for e in (item.get("vulncheck_reported_exploitation") or [])
+        )
+
+        row = [
+            cve_ids,
+            item.get("vendorProject", ""),
+            item.get("product", ""),
+            item.get("vulnerabilityName", ""),
+            cwes,
+            _iso_date(item.get("date_added")),
+            _iso_date(item.get("cisa_date_added")),
+            _iso_date(item.get("dueDate")),
+            item.get("shortDescription", ""),
+            item.get("required_action", ""),
+            item.get("knownRansomwareCampaignUse", ""),
+            item.get("reported_exploited_by_vulncheck_canaries", ""),
+            xdb_urls,
+            exploitation_urls,
+        ]
+        vc_vulns_ws.append(row)
+
+    vc_vulns_ws.auto_filter.ref = vc_vulns_ws.dimensions
+
+    # VC vendor sheet — filtered copy of VC_Vulns
+    vc_vend_ws = wb.copy_worksheet(vc_vulns_ws)
+    vc_vend_ws.title = vc_vend_sheet
+
+    for row_ctr in range(vc_vend_ws.max_row, 1, -1):
+        vendor_cell = vc_vend_ws.cell(row=row_ctr, column=2)  # Vendor is in the second column
+        if vendor_cell.value not in vendor_list:
+            vc_vend_ws.delete_rows(row_ctr)
+
+    vc_vend_ws.auto_filter.ref = vc_vend_ws.dimensions
+
+    # Write VC vendor count into Summary row 10
+    vc_vend_count = vc_vend_ws.max_row - 1  # Exclude header row
+    vc_vend_count_header = "VC Count of " + vendor_name + " vulns"
+    summary_ws.cell(row=10, column=1).value = vc_vend_count_header
+    cell_b10 = summary_ws.cell(row=10, column=2)
+    cell_b10.value = vc_vend_count
+    cell_b10.font = styles.Font(bold=True)
+    cell_b10.alignment = styles.Alignment(horizontal='left')
+
+def check_vc_updates(kev_in_path, vc_data, vendor_list, vendor_name):
+    '''Check if VulnCheck KEV data has changed since the last saved file'''
+    wb = openpyxl.load_workbook(kev_in_path)
+
+    # VC sheets have never been saved
+    if "VC_Vulns" not in wb.sheetnames:
+        print("VulnCheck KEV data: not previously saved.")
+        return True
+
+    # VC rows may be absent if file was saved before VC support was added
+    summary_ws = wb["Summary"]
+    if summary_ws.cell(row=9, column=1).value != "VC Count of Vulnerabilities":
+        print("VulnCheck KEV data: Summary rows not present in saved file.")
+        return True
+
+    saved_count = summary_ws.cell(row=9, column=2).value or 0
+    saved_vend_count = summary_ws.cell(row=10, column=2).value or 0
+    current_count = len(vc_data)
+    current_vend_count = sum(1 for v in vc_data if v.get("vendorProject") in vendor_list)
+
+    print(f" Saved VulnCheck KEV count: {saved_count}, {vendor_name}: {saved_vend_count}")
+
+    if saved_count != current_count or saved_vend_count != current_vend_count:
+        count_str = f"{Fore.YELLOW}{current_count}{Style.RESET_ALL}" if saved_count != current_count else str(current_count)
+        vend_str = f"{Fore.RED}{current_vend_count}{Style.RESET_ALL}" if saved_vend_count != current_vend_count else str(current_vend_count)
+        print(f"Latest VulnCheck KEV count: {count_str}, {vendor_name}: {vend_str}")
+        return True
+    else:
+        print(f"Latest VulnCheck KEV count: {current_count}, {vendor_name}: {current_vend_count} (no change)")
+        return False
 
 def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_count, webhook_url, saved_cve_ids):
     '''Send message to private Discord channel via webhook to notify of KEV updates'''
@@ -99,8 +264,6 @@ def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_
         print(f"Failed to send notification. Status code: {response.status_code}")
         print(response.content)
 
-    return
-
 def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webhook_url, vendor_list, vendor_name):
     '''Check if there are any new KEV vulnerabilities since the last saved KEV file'''
 
@@ -131,7 +294,7 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
         key = row[0]
         value = row[1]
 
-        if key is not None:
+        if key is not None and key in name_dict:
             saved_summary_dict[name_dict[key]] = value
 
     # Convert string with ISO format date to a datetime
@@ -143,7 +306,7 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
         if vuln["vendorProject"] in vendor_list:
             vend_count += 1
 
-    print(f" Saved KEV catalog version: {saved_summary_dict['catalogVersion']}, "
+    print(f" Saved CISA KEV catalog version: {saved_summary_dict['catalogVersion']}, "
           f"date: {saved_release_str}, "
           f"count: {saved_summary_dict['count']}, "
           f"{vendor_name}: {saved_summary_dict['vendCount']}")
@@ -152,13 +315,13 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
     if kev_header["catalogVersion"] != saved_summary_dict['catalogVersion'] or kev_header["dateReleased"] != saved_summary_dict["dateReleased"]:
         if saved_summary_dict['vendCount'] == vend_count:
             # Highlight the overall KEV count in yellow because it has changed
-            print(f"Latest KEV catalog version: {Fore.GREEN}{kev_header['catalogVersion']}{Style.RESET_ALL}, "
+            print(f"Latest CISA KEV catalog version: {Fore.GREEN}{kev_header['catalogVersion']}{Style.RESET_ALL}, "
                   f"date: {Fore.GREEN}{kev_release_str}{Style.RESET_ALL}, "
                   f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
                   f"{vendor_name}: {vend_count}")
         else:
             # Vendor vuln count has changed so highlight this too
-            print(f"Latest KEV catalog version: {Fore.GREEN}{kev_header['catalogVersion']}{Style.RESET_ALL}, "
+            print(f"Latest CISA KEV catalog version: {Fore.GREEN}{kev_header['catalogVersion']}{Style.RESET_ALL}, "
                   f"date: {Fore.GREEN}{kev_release_str}{Style.RESET_ALL}, "
                   f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
                   f"{vendor_name}: {Fore.RED}{vend_count}{Style.RESET_ALL}")
@@ -170,14 +333,14 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
 
         return True
     else:
-        print(f"Latest KEV catalog version: {kev_header["catalogVersion"]}, "
+        print(f"Latest CISA KEV catalog version: {kev_header["catalogVersion"]}, "
               f"date: {kev_release_str}, "
               f"count: {kev_header["count"]}, "
-              f"{vendor_name}: {vend_count}")
+              f"{vendor_name}: {vend_count} (no change)")
         
         return False
 
-def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_fn, kev_out_path):
+def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_fn, kev_out_path, vc_meta=None, vc_data=None):
     '''Save KEV data to an Excel spreadsheet'''
 
     # Mapping of KEV header names to more user-friendly names, for the summary sheet
@@ -264,7 +427,10 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
     # Add the count of vendor entries to the Summary sheet
     vend_count = vend_vulns_ws.max_row - 1
     summary_ws['B5'].value = vend_count
-    print(f"Latest {vendor_name} count: {Fore.YELLOW}{vend_count}{Style.RESET_ALL}")
+
+    # Add VulnCheck sheets if VC data was retrieved
+    if vc_meta is not None and vc_data is not None:
+        write_vc_sheets(wb, vc_meta, vc_data, summary_ws, vendor_list, vendor_name)
 
     # Save the workbook to the specified file
     today_str = date.today().isoformat()
@@ -283,7 +449,7 @@ def main():
 
     # Retrieve KEV list from CISA website
     kev_url:str = config_dict['kev']['kev_url']
-    kev_data = get_kev_data(kev_url)
+    kev_data = get_cisa_kev_data(kev_url)
 
     # Remove the vulnerabilities list from the main dictionary for separate processing
     vulns_list = kev_data.pop("vulnerabilities")
@@ -299,20 +465,32 @@ def main():
     vend_list:list = config_dict['kev']['vendor_list']
     vend_name:str = config_dict['kev']['vendor_name']
 
+    # Optionally fetch VulnCheck KEV data
+    use_vc:bool = config_dict['kev'].get('use_vc', False)
+    vc_meta, vc_data = None, None
+
+    if use_vc:
+        vc_raw = get_vc_kev_data(config_dict['kev']['vc_kev_url'], config_dict['kev']['vc_token'])
+        vc_meta = vc_raw.get('_meta', {})
+        vc_data = vc_raw.get('data', [])
+
     if kev_in_path.is_file():   # A saved KEV file exists
 
-        # Check if the KEV list has been updated since last run, and notify via Discord webhook if changed
-        kev_updated = check_kev_updates(kev_header, vulns_list, kev_in_path, config_dict['kev']['notify'], config_dict['kev']['webhook_url'], vend_list, vend_name)
-        if kev_updated:
-            # The KEV list has been updated so we need to save the new KEV data
-            save_kev_to_excel(kev_header, vulns_list, vend_list, vend_name, kev_in_fn, kev_out_path)
+        # Check CISA and VulnCheck data independently for changes
+        cisa_updated = check_kev_updates(kev_header, vulns_list, kev_in_path, config_dict['kev']['notify'], config_dict['kev']['webhook_url'], vend_list, vend_name)
+        vc_updated = check_vc_updates(kev_in_path, vc_data, vend_list, vend_name) if use_vc else False
+
+        if cisa_updated or vc_updated:
+            save_kev_to_excel(kev_header, vulns_list, vend_list, vend_name, kev_in_fn, kev_out_path,
+                              vc_meta=vc_meta, vc_data=vc_data)
         else:
-            print("No changes to KEV list.")
+            print("No changes to KEV data.")
 
     else:
         # We don't have a previously saved KEV file so we need to save one
         print("Saving KEV data to local Excel spreadsheet...")
-        save_kev_to_excel(kev_header, vulns_list, vend_list, vend_name, kev_in_fn, kev_out_path)
+        save_kev_to_excel(kev_header, vulns_list, vend_list, vend_name, kev_in_fn, kev_out_path,
+                          vc_meta=vc_meta, vc_data=vc_data)
 
 if __name__ == "__main__":
     main()
