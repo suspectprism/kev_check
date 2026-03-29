@@ -1,7 +1,7 @@
 # kev_check
 Checks for updates to the CISA KEV list compared to the last time that the script was run.
 
-If there are changes then notify to a private Discord channel, as shown below:
+If there are changes then optionally notify to a private Discord channel, as shown below:
 
 <img src="./assets/CISA%20KEV%20notification%202026-01-29.jpg" width="400" />
 
@@ -10,7 +10,7 @@ The Discord notification shows:
 - The number of KEVs (previous and current) for a particular vendor that is being tracked. The count shows in **bold** if it has increased.
 - Vendor and product names for each new vulnerability in the KEV list.
 
-Optionally checks for updates to the VulnCheck KEV list in the same way (requires free registration to get an API token). Discord notifications for VulnCheck KEV updates will be added in a future update.
+Optionally checks for updates to the VulnCheck KEV list in the same way (requires free registration to get an API token). If notifications are enabled, then notifications for VulnCheck KEV updates are posted to a different Discord channel from the CISA KEV updates.
 
 ## How it works
 When the script is run for the first time it creates a local spreadsheet which contains the CISA KEV list data.

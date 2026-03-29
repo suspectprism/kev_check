@@ -4,8 +4,10 @@ kev:
   vendor_name: "<Vendor_sheet_name>"
   vendor_list: ["<vendorProject_1>", "<vendorProject_2>", "<vendorProject_3"]
   notify: false
+  in_fn: "/<in_folder_path>/CISA_KEV.xlsx"
+  out_path: "/<out_folder_path>/"
   use_vc: false
   vc_kev_url: "https://api.vulncheck.com/v3/index/vulncheck-kev"
   vc_token: <YOUR_VULNCHECK_API_TOKEN>
-  in_fn: "/<in_folder_path>/CISA_KEV.xlsx"
-  out_path: "/<out_folder_path>/"
+  vc_webhook_url: "https://discord.com/api/webhooks/<YOUR_2ND_WEBHOOK_TOKEN>"
+  

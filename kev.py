@@ -14,7 +14,9 @@
 #
 # v0.5 Optionally download VulnCheck KEV list from VulnCheck API and save updated data to the spreadsheet.
 #
-# P Dowley   v0.5      21 Mar 2026
+# v0.5.1 Notify to another Discord channel if there are changes to the VulnCheck KEV list
+#
+# P Dowley   v0.5.1      29 Mar 2026
 
 import requests
 from discord_webhook import DiscordWebhook, DiscordEmbed
@@ -171,7 +173,7 @@ def write_vc_sheets(wb, vc_meta, vc_data, summary_ws, vendor_list, vendor_name):
     cell_b10.font = styles.Font(bold=True)
     cell_b10.alignment = styles.Alignment(horizontal='left')
 
-def check_vc_updates(kev_in_path, vc_data, vendor_list, vendor_name):
+def check_vc_updates(kev_in_path, vc_data, vendor_list, vendor_name, notify_discord=False, webhook_url=None):
     '''Check if VulnCheck KEV data has changed since the last saved file'''
     wb = openpyxl.load_workbook(kev_in_path)
 
@@ -197,6 +199,17 @@ def check_vc_updates(kev_in_path, vc_data, vendor_list, vendor_name):
         count_str = f"{Fore.YELLOW}{current_count}{Style.RESET_ALL}" if saved_count != current_count else str(current_count)
         vend_str = f"{Fore.RED}{current_vend_count}{Style.RESET_ALL}" if saved_vend_count != current_vend_count else str(current_vend_count)
         print(f"Latest VulnCheck KEV count: {count_str}, {vendor_name}: {vend_str}")
+
+        if notify_discord and webhook_url:
+            saved_cve_ids = set()
+            for row in wb["VC_Vulns"].iter_rows(min_row=2, values_only=True):
+                if row[0]:
+                    saved_cve_ids.update(c.strip() for c in str(row[0]).split(","))
+            notify_vc_to_discord(saved_count, saved_vend_count, vc_data,
+                                  saved_cve_ids, vendor_name, current_vend_count, webhook_url)
+        else:
+            print("Notification to Discord is not required.")
+
         return True
     else:
         print(f"Latest VulnCheck KEV count: {current_count}, {vendor_name}: {current_vend_count} (no change)")
@@ -262,6 +275,47 @@ def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_
         print("Notification to Discord sent successfully.")
     else:
         print(f"Failed to send notification. Status code: {response.status_code}")
+        print(response.content)
+
+def notify_vc_to_discord(saved_count, saved_vend_count, vc_data, saved_cve_ids, vend_name, current_vend_count, webhook_url):
+    '''Send VulnCheck KEV update notification to Discord'''
+
+    current_count = len(vc_data)
+
+    prev_str = f"count: {saved_count},\n{vend_name}: {saved_vend_count}"
+
+    count_bold      = "**" if saved_count      != current_count      else ""
+    vend_count_bold = "**" if saved_vend_count != current_vend_count else ""
+    latest_str = (
+        f"count: {count_bold}{current_count}{count_bold},\n"
+        f"{vend_name}: {vend_count_bold}{current_vend_count}{vend_count_bold}"
+    )
+
+    new_vulns = [v for v in vc_data if not (set(v.get("cve") or []) & saved_cve_ids)]
+    vulns_str = "\n\n".join(
+        ", ".join(v.get("cve") or ["?"]) + " *" + v.get("vendorProject", "") + "* - " + v.get("product", "")
+        for v in new_vulns
+    ) or "None identified"
+
+    webhook = DiscordWebhook(url=webhook_url)
+    embed = DiscordEmbed(title="VulnCheck KEV List updated",
+                         color='e74c3c')  # Red colour for embed
+
+    embed.add_embed_field(name="Previous VC KEV",
+                          value=prev_str, inline=False)
+    embed.add_embed_field(name="Latest VC KEV",
+                          value=latest_str, inline=False)
+    embed.add_embed_field(name="New vulnerabilities",
+                          value=vulns_str, inline=False)
+
+    webhook.add_embed(embed)
+
+    response = webhook.execute()
+
+    if response.status_code == 200:
+        print("VulnCheck notification to Discord sent successfully.")
+    else:
+        print(f"Failed to send VulnCheck notification. Status code: {response.status_code}")
         print(response.content)
 
 def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webhook_url, vendor_list, vendor_name):
@@ -478,7 +532,9 @@ def main():
 
         # Check CISA and VulnCheck data independently for changes
         cisa_updated = check_kev_updates(kev_header, vulns_list, kev_in_path, config_dict['kev']['notify'], config_dict['kev']['webhook_url'], vend_list, vend_name)
-        vc_updated = check_vc_updates(kev_in_path, vc_data, vend_list, vend_name) if use_vc else False
+        vc_updated = check_vc_updates(kev_in_path, vc_data, vend_list, vend_name,
+                                      notify_discord=config_dict['kev']['notify'],
+                                      webhook_url=config_dict['kev'].get('vc_webhook_url')) if use_vc else False
 
         if cisa_updated or vc_updated:
             save_kev_to_excel(kev_header, vulns_list, vend_list, vend_name, kev_in_fn, kev_out_path,
