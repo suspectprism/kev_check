@@ -16,11 +16,16 @@
 #
 # v0.5.1 Notify to another Discord channel if there are changes to the VulnCheck KEV list
 #
+# v0.5.2 Retry logic if there are request failures when retrieving CISA KEV or VC KEV data.
+#        Notify to discord if request fails after retries.
+#        Also handle 1024 char limit in Discord embed fields if notification is too large.
+#
 # P Dowley   v0.5.1      29 Mar 2026
 
 import requests
 from discord_webhook import DiscordWebhook, DiscordEmbed
 import sys
+import time
 from pathlib import Path
 import openpyxl
 from openpyxl import styles
@@ -30,48 +35,73 @@ import shutil
 from colorama import Fore, Style
 from config import load_config
 
-def get_cisa_kev_data(kev_url):
+MAX_RETRIES = 3             # Number of attempts for HTTP requests before giving up
+RETRY_DELAY = 60            # Seconds to wait between retries
+DISCORD_FIELD_LIMIT = 1024  # Discord embed field character limit
+
+def _get_json_with_retry(url, label, notify=False, webhook_url=None, **kwargs):
+    '''GET a URL and return parsed JSON, retrying on transient network errors.
+    Sends a Discord error notification (if notify is enabled) when all retries are exhausted.'''
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.get(url, **kwargs)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if attempt < MAX_RETRIES:
+                print(f"Error retrieving {label} data (attempt {attempt}/{MAX_RETRIES}): {e}")
+                print(f"Retrying in {RETRY_DELAY} seconds...")
+                time.sleep(RETRY_DELAY)
+
+    # All retries exhausted
+    print(f"Error retrieving {label} data from {url}: {last_error}")
+    if notify and webhook_url:
+        try:
+            webhook = DiscordWebhook(url=webhook_url)
+            embed = DiscordEmbed(title="KEV Script Error", color='e67e22')  # Orange for errors
+            embed.add_embed_field(
+                name=f"Failed to retrieve {label}",
+                value=f"All {MAX_RETRIES} attempts failed.\n{last_error}",
+                inline=False
+            )
+            webhook.add_embed(embed)
+            webhook.execute()
+        except Exception:
+            pass  # Do not let a notification failure mask the original error
+    sys.exit(1)
+
+def get_cisa_kev_data(kev_url, notify=False, webhook_url=None):
     '''Fetch KEV data from the CISA website'''
-    try:
-        response = requests.get(kev_url)
-        response.raise_for_status()  # Raise an error for bad status codes
-        kev_data = response.json()  # Parse the JSON content into a Python dictionary
-        print("CISA KEV data downloaded successfully.")
-        return kev_data
-    except requests.exceptions.RequestException as e:
-        print(f"Error retrieving CISA KEV data from {kev_url}: {e}")
-        sys.exit(1)  # Exit on error with a non-zero status
+    kev_data = _get_json_with_retry(kev_url, "CISA KEV", notify=notify, webhook_url=webhook_url)
+    print("CISA KEV data downloaded successfully.")
+    return kev_data
 
-def get_vc_kev_data(vc_url, vc_token):
+def get_vc_kev_data(vc_url, vc_token, notify=False, webhook_url=None):
     '''Fetch all KEV data from the VulnCheck API using cursor-based pagination'''
-    try:
-        headers = {"Authorization": f"Bearer {vc_token}"}
-        all_data = []
-        meta = {}
+    headers = {"Authorization": f"Bearer {vc_token}"}
+    all_data = []
 
-        # First page
-        params = {"start_cursor": "true", "limit": 500}
-        response = requests.get(vc_url, headers=headers, params=params)
-        response.raise_for_status()
-        result = response.json()
+    # First page
+    result = _get_json_with_retry(vc_url, "VulnCheck KEV",
+                                  notify=notify, webhook_url=webhook_url,
+                                  headers=headers,
+                                  params={"start_cursor": "true", "limit": 500})
+    all_data.extend(result.get("data") or [])
+    meta = result.get("_meta") or result.get("meta") or {}
+
+    # Subsequent pages
+    while meta.get("next_cursor"):
+        result = _get_json_with_retry(vc_url, "VulnCheck KEV",
+                                      notify=notify, webhook_url=webhook_url,
+                                      headers=headers,
+                                      params={"cursor": meta["next_cursor"]})
         all_data.extend(result.get("data") or [])
         meta = result.get("_meta") or result.get("meta") or {}
 
-        # Subsequent pages
-        while meta.get("next_cursor"):
-            params = {"cursor": meta["next_cursor"]}
-            response = requests.get(vc_url, headers=headers, params=params)
-            response.raise_for_status()
-            result = response.json()
-            all_data.extend(result.get("data") or [])
-            meta = result.get("_meta") or result.get("meta") or {}
-
-        print("VulnCheck KEV data downloaded successfully.")
-
-        return {"_meta": meta, "data": all_data}
-    except requests.exceptions.RequestException as e:
-        print(f"Error retrieving VulnCheck KEV data from {vc_url}: {e}")
-        sys.exit(1)
+    print("VulnCheck KEV data downloaded successfully.")
+    return {"_meta": meta, "data": all_data}
 
 def write_vc_sheets(wb, vc_meta, vc_data, summary_ws, vendor_list, vendor_name):
     '''Add VC summary rows to the Summary sheet and add/replace VC_Vulns and VC_<vendor> sheets'''
@@ -215,6 +245,17 @@ def check_vc_updates(kev_in_path, vc_data, vendor_list, vendor_name, notify_disc
         print(f"Latest VulnCheck KEV count: {current_count}, {vendor_name}: {current_vend_count} (no change)")
         return False
 
+def _truncate_field(lines, limit=DISCORD_FIELD_LIMIT):
+    '''Join entry lines with double newlines, truncating to the Discord field limit'''
+    result = ""
+    for i, line in enumerate(lines):
+        candidate = (result + "\n\n" + line) if result else line
+        if len(candidate) > limit:
+            remaining = len(lines) - i
+            return result + f"\n\n…and {remaining} more"
+        result = candidate
+    return result or "None identified"
+
 def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_count, webhook_url, saved_cve_ids):
     '''Send message to private Discord channel via webhook to notify of KEV updates'''
 
@@ -258,10 +299,11 @@ def notify_to_discord(saved_summary_dict, kev_data, vulns_list, vend_name, vend_
 
     # New vulnerability details — compare against saved CVE IDs for accuracy
     new_vulns = [v for v in vulns_list if v['cveID'] not in saved_cve_ids]
-    vulns_str = "\n\n".join(
+    vuln_lines = [
         v['cveID'] + " *" + v['vendorProject'] + "* - " + v['product']
         for v in new_vulns
-    ) or "None identified"
+    ]
+    vulns_str = _truncate_field(vuln_lines)
 
     embed.add_embed_field(name="New vulnerabilities",
                           value=vulns_str, inline=False)
@@ -292,10 +334,11 @@ def notify_vc_to_discord(saved_count, saved_vend_count, vc_data, saved_cve_ids, 
     )
 
     new_vulns = [v for v in vc_data if not (set(v.get("cve") or []) & saved_cve_ids)]
-    vulns_str = "\n\n".join(
+    vuln_lines = [
         ", ".join(v.get("cve") or ["?"]) + " *" + v.get("vendorProject", "") + "* - " + v.get("product", "")
         for v in new_vulns
-    ) or "None identified"
+    ]
+    vulns_str = _truncate_field(vuln_lines)
 
     webhook = DiscordWebhook(url=webhook_url)
     embed = DiscordEmbed(title="VulnCheck KEV List updated",
@@ -501,9 +544,13 @@ def main():
     config_path = "config.yaml"
     config_dict = load_config(config_path)
 
+    # Notification settings
+    notify:bool = config_dict['kev']['notify']
+    webhook_url:str = config_dict['kev']['webhook_url']
+
     # Retrieve KEV list from CISA website
     kev_url:str = config_dict['kev']['kev_url']
-    kev_data = get_cisa_kev_data(kev_url)
+    kev_data = get_cisa_kev_data(kev_url, notify=notify, webhook_url=webhook_url)
 
     # Remove the vulnerabilities list from the main dictionary for separate processing
     vulns_list = kev_data.pop("vulnerabilities")
@@ -524,16 +571,17 @@ def main():
     vc_meta, vc_data = None, None
 
     if use_vc:
-        vc_raw = get_vc_kev_data(config_dict['kev']['vc_kev_url'], config_dict['kev']['vc_token'])
+        vc_raw = get_vc_kev_data(config_dict['kev']['vc_kev_url'], config_dict['kev']['vc_token'],
+                                 notify=notify, webhook_url=webhook_url)
         vc_meta = vc_raw.get('_meta', {})
         vc_data = vc_raw.get('data', [])
 
     if kev_in_path.is_file():   # A saved KEV file exists
 
         # Check CISA and VulnCheck data independently for changes
-        cisa_updated = check_kev_updates(kev_header, vulns_list, kev_in_path, config_dict['kev']['notify'], config_dict['kev']['webhook_url'], vend_list, vend_name)
+        cisa_updated = check_kev_updates(kev_header, vulns_list, kev_in_path, notify, webhook_url, vend_list, vend_name)
         vc_updated = check_vc_updates(kev_in_path, vc_data, vend_list, vend_name,
-                                      notify_discord=config_dict['kev']['notify'],
+                                      notify_discord=notify,
                                       webhook_url=config_dict['kev'].get('vc_webhook_url')) if use_vc else False
 
         if cisa_updated or vc_updated:
