@@ -20,7 +20,14 @@
 #        Notify to discord if request fails after retries.
 #        Also handle 1024 char limit in Discord embed fields if notification is too large.
 #
-# P Dowley   v0.5.1      29 Mar 2026
+# v0.5.3 Fix duplicate notifications: moved Discord notifications to after a confirmed save.
+#        Previously, notifications were sent inside check_kev_updates / check_vc_updates
+#        before save_kev_to_excel ran. If the save failed (e.g. comparison file locked in
+#        Excel), the comparison file was not updated and the next run re-notified the same
+#        vulnerabilities. Now check functions return change data; main() saves first, then
+#        notifies only on success. Added error handling and a Discord alert on save failure.
+#
+# P Dowley   v0.5.3      14 May 2026
 
 import requests
 from discord_webhook import DiscordWebhook, DiscordEmbed
@@ -203,25 +210,32 @@ def write_vc_sheets(wb, vc_meta, vc_data, summary_ws, vendor_list, vendor_name):
     cell_b10.font = styles.Font(bold=True)
     cell_b10.alignment = styles.Alignment(horizontal='left')
 
-def check_vc_updates(kev_in_path, vc_data, vendor_list, vendor_name, notify_discord=False, webhook_url=None):
-    '''Check if VulnCheck KEV data has changed since the last saved file'''
+def check_vc_updates(kev_in_path, vc_data, vendor_list, vendor_name):
+    '''Check if VulnCheck KEV data has changed since the last saved file.
+
+    Returns (updated: bool, notify_data: dict | None).
+    updated=True means a save is needed.
+    notify_data is None when no notification should be sent (first run or no change);
+    otherwise a dict with keys saved_count, saved_vend_count, saved_cve_ids, current_vend_count.
+    '''
+    current_count = len(vc_data)
+    current_vend_count = sum(1 for v in vc_data if v.get("vendorProject") in vendor_list)
+
     wb = openpyxl.load_workbook(kev_in_path)
 
-    # VC sheets have never been saved
+    # VC sheets have never been saved — save needed, no notification
     if "VC_Vulns" not in wb.sheetnames:
         print("VulnCheck KEV data: not previously saved.")
-        return True
+        return True, None
 
     # VC rows may be absent if file was saved before VC support was added
     summary_ws = wb["Summary"]
     if summary_ws.cell(row=9, column=1).value != "VC Count of Vulnerabilities":
         print("VulnCheck KEV data: Summary rows not present in saved file.")
-        return True
+        return True, None
 
     saved_count = summary_ws.cell(row=9, column=2).value or 0
     saved_vend_count = summary_ws.cell(row=10, column=2).value or 0
-    current_count = len(vc_data)
-    current_vend_count = sum(1 for v in vc_data if v.get("vendorProject") in vendor_list)
 
     print(f" Saved VulnCheck KEV count: {saved_count}, {vendor_name}: {saved_vend_count}")
 
@@ -230,20 +244,20 @@ def check_vc_updates(kev_in_path, vc_data, vendor_list, vendor_name, notify_disc
         vend_str = f"{Fore.RED}{current_vend_count}{Style.RESET_ALL}" if saved_vend_count != current_vend_count else str(current_vend_count)
         print(f"Latest VulnCheck KEV count: {count_str}, {vendor_name}: {vend_str}")
 
-        if notify_discord and webhook_url:
-            saved_cve_ids = set()
-            for row in wb["VC_Vulns"].iter_rows(min_row=2, values_only=True):
-                if row[0]:
-                    saved_cve_ids.update(c.strip() for c in str(row[0]).split(","))
-            notify_vc_to_discord(saved_count, saved_vend_count, vc_data,
-                                  saved_cve_ids, vendor_name, current_vend_count, webhook_url)
-        else:
-            print("Notification to Discord is not required.")
+        saved_cve_ids = set()
+        for row in wb["VC_Vulns"].iter_rows(min_row=2, values_only=True):
+            if row[0]:
+                saved_cve_ids.update(c.strip() for c in str(row[0]).split(","))
 
-        return True
+        return True, {
+            "saved_count": saved_count,
+            "saved_vend_count": saved_vend_count,
+            "saved_cve_ids": saved_cve_ids,
+            "current_vend_count": current_vend_count,
+        }
     else:
         print(f"Latest VulnCheck KEV count: {current_count}, {vendor_name}: {current_vend_count} (no change)")
-        return False
+        return False, None
 
 def _truncate_field(lines, limit=DISCORD_FIELD_LIMIT):
     '''Join entry lines with double newlines, truncating to the Discord field limit'''
@@ -361,8 +375,13 @@ def notify_vc_to_discord(saved_count, saved_vend_count, vc_data, saved_cve_ids, 
         print(f"Failed to send VulnCheck notification. Status code: {response.status_code}")
         print(response.content)
 
-def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webhook_url, vendor_list, vendor_name):
-    '''Check if there are any new KEV vulnerabilities since the last saved KEV file'''
+def check_kev_updates(kev_header, vulns_list, kev_in_path, vendor_list, vendor_name):
+    '''Check if there are any new KEV vulnerabilities since the last saved KEV file.
+
+    Returns (updated: bool, notify_data: dict | None).
+    notify_data contains saved_summary_dict, vend_count, saved_cve_ids when a notification
+    should be sent; None otherwise.
+    '''
 
     # Convert string with ISO format date to a datetime
     kev_release_dt = datetime.fromisoformat(kev_header['dateReleased'].replace("Z", "+00:00"))
@@ -423,19 +442,18 @@ def check_kev_updates(kev_header, vulns_list, kev_in_path, notify_discord, webho
                   f"count: {Fore.YELLOW}{kev_header['count']}{Style.RESET_ALL}, "
                   f"{vendor_name}: {Fore.RED}{vend_count}{Style.RESET_ALL}")
 
-        if notify_discord:
-            notify_to_discord(saved_summary_dict, kev_header, vulns_list, vendor_name, vend_count, webhook_url, saved_cve_ids)
-        else:
-            print("Notification to Discord is not required.")
-
-        return True
+        return True, {
+            "saved_summary_dict": saved_summary_dict,
+            "vend_count": vend_count,
+            "saved_cve_ids": saved_cve_ids,
+        }
     else:
         print(f"Latest CISA KEV catalog version: {kev_header["catalogVersion"]}, "
               f"date: {kev_release_str}, "
               f"count: {kev_header["count"]}, "
               f"{vendor_name}: {vend_count} (no change)")
-        
-        return False
+
+        return False, None
 
 def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_fn, kev_out_path, vc_meta=None, vc_data=None):
     '''Save KEV data to an Excel spreadsheet'''
@@ -537,7 +555,13 @@ def save_kev_to_excel(kev_header, vulns_list, vendor_list, vendor_name, kev_in_f
     print(f"KEV data saved to {out_fn}")
 
     # Copy the new KEV file to the input file path for future comparisons
-    shutil.copy(out_fn, kev_in_fn)
+    try:
+        shutil.copy(out_fn, kev_in_fn)
+    except OSError as e:
+        raise OSError(
+            f"Saved history file to {out_fn} but could not update comparison file {kev_in_fn}: {e}\n"
+            f"If the file is open in another application, close it and re-run the script."
+        ) from e
 
 def main():
     # Open config file
@@ -576,17 +600,47 @@ def main():
         vc_meta = vc_raw.get('_meta', {})
         vc_data = vc_raw.get('data', [])
 
+    vc_webhook_url: str = config_dict['kev'].get('vc_webhook_url')
+
     if kev_in_path.is_file():   # A saved KEV file exists
 
-        # Check CISA and VulnCheck data independently for changes
-        cisa_updated = check_kev_updates(kev_header, vulns_list, kev_in_path, notify, webhook_url, vend_list, vend_name)
-        vc_updated = check_vc_updates(kev_in_path, vc_data, vend_list, vend_name,
-                                      notify_discord=notify,
-                                      webhook_url=config_dict['kev'].get('vc_webhook_url')) if use_vc else False
+        # Check CISA and VulnCheck data independently for changes.
+        # Neither function sends notifications — they return change data so that
+        # notifications are only sent after a confirmed successful save.
+        cisa_updated, cisa_notify = check_kev_updates(kev_header, vulns_list, kev_in_path, vend_list, vend_name)
+        vc_updated, vc_notify = check_vc_updates(kev_in_path, vc_data, vend_list, vend_name) if use_vc else (False, None)
 
         if cisa_updated or vc_updated:
-            save_kev_to_excel(kev_header, vulns_list, vend_list, vend_name, kev_in_fn, kev_out_path,
-                              vc_meta=vc_meta, vc_data=vc_data)
+            try:
+                save_kev_to_excel(kev_header, vulns_list, vend_list, vend_name, kev_in_fn, kev_out_path,
+                                  vc_meta=vc_meta, vc_data=vc_data)
+            except OSError as e:
+                print(f"Save failed: {e}")
+                if notify and webhook_url:
+                    try:
+                        webhook = DiscordWebhook(url=webhook_url)
+                        embed = DiscordEmbed(title="KEV Script Error", color='e67e22')
+                        embed.add_embed_field(name="Failed to save KEV data", value=str(e), inline=False)
+                        webhook.add_embed(embed)
+                        webhook.execute()
+                    except Exception:
+                        pass
+                sys.exit(1)
+
+            # Notify only after the save and comparison-file update have both succeeded
+            if notify:
+                if cisa_notify is not None:
+                    notify_to_discord(cisa_notify["saved_summary_dict"], kev_header, vulns_list,
+                                      vend_name, cisa_notify["vend_count"], webhook_url,
+                                      cisa_notify["saved_cve_ids"])
+                if vc_notify is not None and vc_webhook_url:
+                    notify_vc_to_discord(vc_notify["saved_count"], vc_notify["saved_vend_count"],
+                                         vc_data, vc_notify["saved_cve_ids"],
+                                         vend_name, vc_notify["current_vend_count"], vc_webhook_url)
+                if cisa_notify is None and vc_notify is None:
+                    print("Notification to Discord is not required.")
+            else:
+                print("Notification to Discord is not required.")
         else:
             print("No changes to KEV data.")
 
