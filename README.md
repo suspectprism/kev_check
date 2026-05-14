@@ -16,13 +16,15 @@ Optionally checks for updates to the VulnCheck KEV list in the same way (require
 When the script is run for the first time it creates a local spreadsheet which contains the CISA KEV list data.
 This local reference spreadsheet is stored in the input folder for the script.
 
-The reference spreadsheet has three tabs:
+The reference spreadsheet has five tabs:
 - Summary, which stores the high-level details of the last CISA KEV update
 - Vulns, which stores the details for each vulnerability in the CISA KEV list
 - <vendor_name>, which stores the subset of CISA KEV vulnerabilities that were for a specific vendor
+- VC_Vulns, which stores the details for each vulnerability in the VulnCheck KEV list
+- VC_<vendor_name>, which stores the subset of VulnCheck KEV vulnerabilities that were for a specific vendor
 
-On subsequent runs, the script checks if there are changes to the number of CISA KEV entries compared to the saved sheet.
-If the CISA KEV list has changed then a new spreadsheet is created in the output folder during processing.
+On subsequent runs, the script checks if there are changes to the number of CISA or VC KEV entries compared to the saved sheet.
+If the CISA or VC KEV list has changed then a new spreadsheet is created in the output folder during processing.
 A notification is sent to a Discord channel if required. This reports on all new vulnerabilities that weren't in the previous saved KEV list.
 Finally the local reference spreadsheet in the input folder is replaced with a copy of the new spreadsheet.
 
@@ -34,7 +36,7 @@ Create separate input and output folders for the script to use.
 For example, **/data/kev_check/in** and **/data/kev_check/out**
 
 ### config.yaml
-Create a config.yaml file based on the template. *Make sure that config.yaml in specified in your .gitignore file.*
+Create a config.yaml file based on the template. *Make sure that config.yaml is specified in your .gitignore file.*
 
 - **in_fn** value is the input file name that will be stored in the input folder created in the previous step.
 - **out_path** value is the output folder name that was created in the previous step.

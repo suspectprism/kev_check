@@ -6,6 +6,9 @@ dist/
 wheels/
 *.egg-info
 
+# AI-generated files
+.claude
+
 # Linter files
 .ruff_cache
 
