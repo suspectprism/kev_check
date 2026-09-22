@@ -27,8 +27,16 @@
 #        vulnerabilities. Now check functions return change data; main() saves first, then
 #        notifies only on success. Added error handling and a Discord alert on save failure.
 #
-# P Dowley   v0.5.3      14 May 2026
+# v0.5.4 Add "VC Indexed Date" column to VC_Vulns and VC_VMware sheets, sourced from the
+#        per-entry _timestamp field returned by the VulnCheck API. This reflects when
+#        VulnCheck added the entry to their index, which differs from date_added (the CISA
+#        or original exploit date) for retroactively added historical CVEs. As VC_Vulns is
+#        always fully rebuilt from the API on each save, existing entries are automatically
+#        populated when the column first appears — no separate migration step needed.
+#
+# P Dowley   v0.5.4      22 Sep 2026
 
+import re
 import requests
 from discord_webhook import DiscordWebhook, DiscordEmbed
 import sys
@@ -137,7 +145,7 @@ def write_vc_sheets(wb, vc_meta, vc_data, summary_ws, vendor_list, vendor_name):
 
     headers = [
         "CVE ID", "Vendor", "Product", "Vulnerability Name", "CWEs",
-        "Date Added (VC)", "CISA Date Added", "Due Date",
+        "Date Added (VC)", "VC Indexed Date", "CISA Date Added", "Due Date",
         "Short Description", "Required Action",
         "Ransomware Campaign", "Canary Exploitation",
         "XDB Exploit URLs", "Reported Exploitation URLs",
@@ -147,16 +155,18 @@ def write_vc_sheets(wb, vc_meta, vc_data, summary_ws, vendor_list, vendor_name):
     for cell in vc_vulns_ws[1]:
         cell.font = styles.Font(bold=True)
 
-    col_widths = [15, 15, 20, 40, 15, 12, 12, 12, 40, 40, 20, 20, 50, 50]
+    col_widths = [15, 15, 20, 40, 15, 12, 12, 12, 12, 40, 40, 20, 20, 50, 50]
     for i, width in enumerate(col_widths, start=1):
         vc_vulns_ws.column_dimensions[utils.get_column_letter(i)].width = width
 
     def _iso_date(value):
-        '''Parse a timestamp string and return a yyyy-mm-dd string, or "" if empty'''
+        '''Parse a timestamp string and return a yyyy-mm-dd string, or "" if empty.
+        Handles nanosecond-precision timestamps by truncating fractional seconds to 6 digits.'''
         if not value:
             return ""
         try:
-            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime("%Y-%m-%d")
+            s = re.sub(r'(\.\d{6})\d+', r'\1', str(value)).replace("Z", "+00:00")
+            return datetime.fromisoformat(s).strftime("%Y-%m-%d")
         except ValueError:
             return str(value)
 
@@ -177,6 +187,7 @@ def write_vc_sheets(wb, vc_meta, vc_data, summary_ws, vendor_list, vendor_name):
             item.get("vulnerabilityName", ""),
             cwes,
             _iso_date(item.get("date_added")),
+            _iso_date(item.get("_timestamp")),
             _iso_date(item.get("cisa_date_added")),
             _iso_date(item.get("dueDate")),
             item.get("shortDescription", ""),
